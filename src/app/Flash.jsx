@@ -2,8 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import posthog from 'posthog-js'
 import * as Sentry from '@sentry/react'
 
-import { FlashManager, StepCode, ErrorCode, DeviceType } from '../utils/manager'
-import { useImageManager } from '../utils/image'
+import { FlashManager, StepCode, ErrorCode, DeviceType, FlashMode } from '../utils/manager'
+import {
+  cleanupStorageProbe,
+  runStorageProbe,
+  useImageManager,
+} from '../utils/image'
 import { isLinux, isWindows } from '../utils/platform'
 import config from '../config'
 
@@ -53,7 +57,7 @@ const originalConsole = { log: console.log, warn: console.warn, error: console.e
 })
 
 // Debug info component for error reporting
-function DebugInfo({ error, step, selectedDevice, serial, message, onClose }) {
+function DebugInfo({ error, step, selectedDevice, flashMode, serial, message, onClose }) {
   const [copied, setCopied] = useState(false)
 
   const getDebugReport = () => {
@@ -90,6 +94,7 @@ function DebugInfo({ error, step, selectedDevice, serial, message, onClose }) {
     return `## Bug Report - flash.comma.ai
 
 **Device:** ${deviceName}
+**Flash Mode:** ${flashMode || 'unknown'}
 **Serial:** ${serial || 'N/A'}
 **Error:** ${errorName}
 **Step:** ${stepName}
@@ -542,12 +547,140 @@ function WebUSBConnect({ onConnect }) {
   )
 }
 
-// Device picker component
-function DevicePicker({ onSelect }) {
-  const [selected, setSelected] = useState(null)
+const STORAGE_PROBE_MARKER = 'comma-flash-storage-probe-active'
+
+function StoragePreCheck({ flashMode, storageCleanupComplete, onProbeStatusChange }) {
+  const [probeStatus, setProbeStatus] = useState('idle')
+  const [probeProgress, setProbeProgress] = useState(0)
+  const [probeMessage, setProbeMessage] = useState('')
+  const probeStatusRef = useRef('idle')
+  const flashModeRef = useRef(flashMode)
+  const probeAbortRef = useRef(null)
+  const probeRunRef = useRef(0)
+
+  flashModeRef.current = flashMode
+
+  const updateProbeStatus = (nextStatus, nextMessage = '') => {
+    probeStatusRef.current = nextStatus
+    setProbeStatus(nextStatus)
+    setProbeMessage(nextMessage)
+    onProbeStatusChange(nextStatus)
+  }
+
+  const startProbe = async () => {
+    if (probeStatusRef.current === 'running') return
+    const runId = ++probeRunRef.current
+    const abortController = new AbortController()
+    probeAbortRef.current = abortController
+    setProbeProgress(0)
+    updateProbeStatus('running')
+
+    try {
+      localStorage.setItem(STORAGE_PROBE_MARKER, '1')
+    } catch {
+      // The OPFS write itself remains authoritative if localStorage is unavailable.
+    }
+
+    try {
+      await runStorageProbe({
+        signal: abortController.signal,
+        onProgress: (progress) => {
+          if (probeRunRef.current !== runId) return
+          setProbeProgress(progress)
+        },
+      })
+      if (probeRunRef.current !== runId) return
+      try { localStorage.removeItem(STORAGE_PROBE_MARKER) } catch { /* ignored */ }
+      updateProbeStatus('passed', 'Storage pre-check passed.')
+    } catch (error) {
+      if (probeRunRef.current !== runId) return
+      try { localStorage.removeItem(STORAGE_PROBE_MARKER) } catch { /* ignored */ }
+      if (error?.name === 'AbortError') {
+        if (flashModeRef.current === FlashMode.STREAMING) {
+          updateProbeStatus('skipped')
+        } else {
+          updateProbeStatus('failed', 'Storage pre-check canceled. Retry it or choose Low storage.')
+        }
+      } else {
+        updateProbeStatus(
+          'failed',
+          'Storage pre-check failed. Your computer does not have enough free disk space for Standard mode. Free at least 6 GiB or choose Low storage.',
+        )
+      }
+    } finally {
+      if (probeRunRef.current === runId) probeAbortRef.current = null
+    }
+  }
+
+  useEffect(() => {
+    if (!storageCleanupComplete) return
+
+    if (flashMode === FlashMode.STREAMING) {
+      probeAbortRef.current?.abort()
+      cleanupStorageProbe().catch((error) => console.warn('[Storage] Could not release storage test file:', error))
+      updateProbeStatus('skipped')
+      return
+    }
+
+    if (probeStatusRef.current === 'idle') {
+      let previousProbeInterrupted = false
+      try {
+        previousProbeInterrupted = localStorage.getItem(STORAGE_PROBE_MARKER) === '1'
+        localStorage.removeItem(STORAGE_PROBE_MARKER)
+      } catch {
+        // Continue with a new probe when localStorage is unavailable.
+      }
+      if (previousProbeInterrupted) {
+        updateProbeStatus('failed', 'Storage pre-check failed. Your computer does not have enough free disk space for Standard mode. Free at least 6 GiB or choose Low storage.')
+        return
+      }
+    }
+
+    if (probeStatusRef.current === 'idle' || probeStatusRef.current === 'skipped') {
+      startProbe()
+    }
+  }, [flashMode, storageCleanupComplete])
+
+  useEffect(() => () => {
+    if (probeStatusRef.current === 'running') probeAbortRef.current?.abort()
+  }, [])
 
   return (
-    <div className="wizard-screen flex flex-col items-center justify-center h-full gap-8 p-8">
+    <div className="mb-3 rounded-lg border border-gray-200 bg-white p-3 text-sm">
+      <p className="font-semibold">Storage pre-check</p>
+      {flashMode === FlashMode.STAGED && probeStatus === 'running' && (
+        <div className="mt-3">
+          <div className="flex justify-between gap-3">
+            <span>Checking available storage...</span>
+            <button type="button" onClick={() => probeAbortRef.current?.abort()} className="text-blue-600 hover:underline">Cancel</button>
+          </div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-200">
+            <div className="h-full bg-[#51ff00] transition-all" style={{ width: `${probeProgress * 100}%` }} />
+          </div>
+        </div>
+      )}
+      {flashMode === FlashMode.STAGED && probeStatus === 'passed' && (
+        <p className="mt-2 text-green-700">{probeMessage}</p>
+      )}
+      {flashMode === FlashMode.STAGED && probeStatus === 'failed' && (
+        <div className="mt-2 text-red-700">
+          <p>{probeMessage}</p>
+          <button type="button" onClick={startProbe} className="mt-1 text-blue-600 hover:underline">Retry storage pre-check</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Device picker component
+function DevicePicker({ onSelect, storageCleanupComplete }) {
+  const [selected, setSelected] = useState(null)
+  const [flashMode, setFlashMode] = useState(FlashMode.STAGED)
+  const [probeStatus, setProbeStatus] = useState('idle')
+  const storageReady = flashMode === FlashMode.STREAMING || probeStatus === 'passed'
+
+  return (
+    <div className="wizard-screen flex flex-col items-center justify-center h-full gap-6 p-8 overflow-y-auto">
       <div className="text-center">
         <h2 className="text-3xl font-bold mb-2">Which device are you flashing?</h2>
         <p className="text-xl text-gray-600">Select your comma device</p>
@@ -579,11 +712,44 @@ function DevicePicker({ onSelect }) {
         </button>
       </div>
 
+      <div className="w-full max-w-2xl">
+        <h3 className="text-lg font-semibold text-center mb-3">Storage mode</h3>
+        <StoragePreCheck
+          flashMode={flashMode}
+          storageCleanupComplete={storageCleanupComplete}
+          onProbeStatusChange={setProbeStatus}
+        />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button
+            onClick={() => setFlashMode(FlashMode.STAGED)}
+            className={`p-4 rounded-xl border-2 text-left transition-colors ${
+              flashMode === FlashMode.STAGED
+                ? 'border-[#51ff00] bg-[#51ff00]/10'
+                : 'border-gray-300 hover:border-gray-400'
+            }`}
+          >
+            <span className="block font-semibold">Standard</span>
+            <span className="block text-sm text-gray-600 mt-1">Downloads images once and stores them locally while flashing.</span>
+          </button>
+          <button
+            onClick={() => setFlashMode(FlashMode.STREAMING)}
+            className={`p-4 rounded-xl border-2 text-left transition-colors ${
+              flashMode === FlashMode.STREAMING
+                ? 'border-[#51ff00] bg-[#51ff00]/10'
+                : 'border-gray-300 hover:border-gray-400'
+            }`}
+          >
+            <span className="block font-semibold">Low storage <span className="text-xs text-amber-600">Experimental</span></span>
+            <span className="block text-sm text-gray-600 mt-1">Streams directly to the device. Requires a stable connection; A/B images download twice.</span>
+          </button>
+        </div>
+      </div>
+
       <button
-        onClick={() => selected && onSelect(selected)}
-        disabled={!selected}
+        onClick={() => selected && storageReady && onSelect(selected, flashMode)}
+        disabled={!selected || !storageReady}
         className={`px-8 py-3 text-xl font-semibold rounded-full transition-colors ${
-          selected
+          selected && storageReady
             ? 'bg-[#51ff00] hover:bg-[#45e000] active:bg-[#3acc00] text-black'
             : 'bg-gray-300 text-gray-500 cursor-not-allowed'
         }`}
@@ -623,6 +789,8 @@ export default function Flash() {
   const [connected, setConnected] = useState(false)
   const [serial, setSerial] = useState(null)
   const [selectedDevice, setSelectedDevice] = useState(null)
+  const [flashMode, setFlashMode] = useState(FlashMode.STAGED)
+  const [storageCleanupComplete, setStorageCleanupComplete] = useState(false)
   const [wizardScreen, setWizardScreen] = useState('landing') // 'landing', 'device', 'zadig', 'connect', 'unbind', 'webusb', 'flash'
   const reportSentRef = useRef(false)
 
@@ -632,6 +800,12 @@ export default function Flash() {
   // Build steps based on current platform and selected device
   const wizardSteps = getWizardSteps(selectedDevice)
   const wizardStep = screenToStep[wizardScreen] ? wizardSteps.indexOf(screenToStep[wizardScreen]) : -1
+
+  useEffect(() => {
+    cleanupStorageProbe()
+      .catch((error) => console.warn('[Storage] Could not clean up a previous storage test:', error))
+      .finally(() => setStorageCleanupComplete(true))
+  }, [])
 
   useEffect(() => {
     if (!imageManager.current) return
@@ -671,6 +845,7 @@ export default function Flash() {
       result,
       serial,
       device_type: selectedDevice,
+      flash_mode: flashMode,
       error_code: errorName,
       step: stepName,
     })
@@ -678,7 +853,7 @@ export default function Flash() {
     // Sentry
     Sentry.captureMessage('flash_session', {
       level: result === 'pass' ? 'info' : 'error',
-      tags: { result, serial, device_type: selectedDevice, error_code: errorName, step: stepName },
+      tags: { result, serial, device_type: selectedDevice, flash_mode: flashMode, error_code: errorName, step: stepName },
       extra: { console_tail: consoleLogs.slice(-200) },
     })
   }
@@ -711,8 +886,9 @@ export default function Flash() {
   }
 
   // Handle device selection
-  const handleDeviceSelect = (deviceType) => {
+  const handleDeviceSelect = (deviceType, selectedFlashMode) => {
     setSelectedDevice(deviceType)
+    setFlashMode(selectedFlashMode)
     if (isWindows) {
       setWizardScreen('zadig')
     } else {
@@ -742,7 +918,7 @@ export default function Flash() {
 
   // Handle WebUSB connect button
   const handleWebUSBConnect = () => {
-    qdlManager.current?.start()
+    qdlManager.current?.start(flashMode)
   }
 
   // Handle going back in wizard
@@ -752,6 +928,7 @@ export default function Flash() {
       setStep(StepCode.DEVICE_PICKER)
       setWizardScreen('device')
       setSelectedDevice(null)
+      setFlashMode(FlashMode.STAGED)
     } else if (stepName === 'Driver') {
       setWizardScreen('zadig')
     } else if (stepName === 'Connect') {
@@ -779,7 +956,7 @@ export default function Flash() {
     return (
       <div className="relative h-full">
         <Stepper steps={wizardSteps} currentStep={wizardStep} onStepClick={handleWizardBack} />
-        <DevicePicker onSelect={handleDeviceSelect} />
+        <DevicePicker onSelect={handleDeviceSelect} storageCleanupComplete={storageCleanupComplete} />
       </div>
     )
   }
@@ -911,6 +1088,7 @@ export default function Flash() {
           error={error}
           step={step}
           selectedDevice={selectedDevice}
+          flashMode={flashMode}
           serial={serial}
           message={message}
           onClose={hideRetry ? () => setShowDebugInfo(false) : undefined}

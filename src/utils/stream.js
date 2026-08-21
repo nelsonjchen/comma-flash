@@ -35,6 +35,18 @@ export async function fetchStream(url, requestOptions = {}, options = {}) {
     if (!response.ok || (response.status !== 206 && response.status !== 200)) {
       throw new Error(`Fetch error: ${response.status}`)
     }
+    if (startByte > 0) {
+      if (response.status !== 206) {
+        throw new Error('Server ignored Range request while resuming download')
+      }
+      const contentRange = response.headers.get('Content-Range')
+      // Content-Range is not always exposed to browser JavaScript by CORS.
+      // Validate it when available; the required 206 status still prevents
+      // accidentally appending a full 200 response to a partial download.
+      if (contentRange && !contentRange.startsWith(`bytes ${startByte}-`)) {
+        throw new Error(`Invalid Content-Range while resuming download: ${contentRange}`)
+      }
+    }
     return response
   }
 

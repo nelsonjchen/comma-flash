@@ -4,6 +4,7 @@ import { usbClass } from '@commaai/qdl/usblib'
 import { getManifest } from './manifest'
 import config from '../config'
 import { createSteps, withProgress } from './progress'
+import { downloadAndFlashImage, downloadSmallImage } from './stream-flash'
 
 // Fast mode for development - skips flashing system partition (the slowest)
 // Enable with ?fast=1 in URL
@@ -28,6 +29,11 @@ export const StepCode = {
 export const DeviceType = {
   COMMA_3: 'comma3',  // comma 3 or 3X
   COMMA_4: 'comma4',  // comma four
+}
+
+export const FlashMode = {
+  STAGED: 'staged',
+  STREAMING: 'streaming',
 }
 
 export const ErrorCode = {
@@ -119,6 +125,7 @@ export class FlashManager {
     this.imageManager = null
     /** @type {ManifestImage[]|null} */
     this.manifest = null
+    this.flashMode = FlashMode.STAGED
     this.step = StepCode.INITIALIZING
     this.error = ErrorCode.NONE
   }
@@ -173,11 +180,6 @@ export class FlashManager {
       this.#setError(ErrorCode.REQUIREMENTS_NOT_MET)
       return false
     }
-    if (typeof Storage === 'undefined') {
-      console.error('[Flash] Storage API not supported')
-      this.#setError(ErrorCode.REQUIREMENTS_NOT_MET)
-      return false
-    }
     return true
   }
 
@@ -191,22 +193,32 @@ export class FlashManager {
       return
     }
 
+    this.#setStep(StepCode.READY)
+  }
+
+  async #prepareStorage() {
+    if (this.flashMode !== FlashMode.STAGED) return true
+    if (!navigator.storage?.getDirectory) {
+      this.#setMessage('Storage pre-check is unavailable. Try Low storage mode instead.')
+      this.#setError(ErrorCode.STORAGE_SPACE)
+      return false
+    }
+
     try {
       await this.imageManager.init()
+      return true
     } catch (err) {
-      console.error('[Flash] Failed to initialize image worker')
+      console.error('[Flash] Failed to initialize image storage')
       console.error(err)
       const message = err?.message || String(err)
       if (message.startsWith('Not enough storage')) {
+        this.#setMessage(`${message}. Try Low storage mode instead.`)
         this.#setError(ErrorCode.STORAGE_SPACE)
-        this.#setMessage(message)
       } else {
         this.#setError(ErrorCode.UNKNOWN)
       }
-      return
+      return false
     }
-
-    this.#setStep(StepCode.READY)
   }
 
   async #connect() {
@@ -316,8 +328,13 @@ export class FlashManager {
         const [onDownload, onRepair] = createSteps([2, 1], onProgress)
 
         // Download GPT image
-        await this.imageManager.downloadImage(image, onDownload)
-        const blob = await this.imageManager.getImage(image);
+        let blob
+        if (this.flashMode === FlashMode.STREAMING) {
+          blob = await downloadSmallImage(image, onDownload)
+        } else {
+          await this.imageManager.downloadImage(image, onDownload)
+          blob = await this.imageManager.getImage(image)
+        }
 
         // Recreate main and backup GPT for this LUN
         if (!await this.device.repairGpt(image.gpt.lun, blob)) {
@@ -393,6 +410,17 @@ export class FlashManager {
 
     try {
       for await (const image of systemImages) {
+        if (this.flashMode === FlashMode.STREAMING) {
+          const slots = image.hasAB ? ['_a', '_b'] : ['']
+          for (const [slot, onSlotProgress] of withProgress(slots, this.#setProgress.bind(this))) {
+            const partitionName = `${image.name.startsWith('userdata_') ? 'userdata' : image.name}${slot}`
+            this.#setMessage(`Streaming ${partitionName}`)
+            await downloadAndFlashImage(this.device, image, partitionName, onSlotProgress)
+            onSlotProgress(1.0)
+          }
+          continue
+        }
+
         const [onDownload, onFlash] = createSteps([1, image.hasAB ? 2 : 1], this.#setProgress.bind(this))
 
         this.#setMessage(`Downloading ${image.name}`)
@@ -439,8 +467,10 @@ export class FlashManager {
     this.#setStep(StepCode.DONE)
   }
 
-  async start() {
+  async start(flashMode = FlashMode.STAGED) {
     if (this.step !== StepCode.READY) return
+    this.flashMode = flashMode
+    if (!await this.#prepareStorage()) return
     await this.#connect()
     // Check if connection was cancelled (step went back to READY) or failed
     if (this.step === StepCode.READY || this.error !== ErrorCode.NONE) return

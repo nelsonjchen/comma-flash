@@ -106,6 +106,7 @@ describe('fetchStream', () => {
       .mockResolvedValueOnce(
         mockResponse({
           body: [' second part'],
+          status: 206,
           headers: {
             'content-length': '12',
             'content-range': 'bytes 10-21/22',
@@ -118,6 +119,50 @@ describe('fetchStream', () => {
     expect(await readText(stream)).toBe('First part second part')
     const { headers } = global.fetch.mock.calls[1][1]
     expect(headers['range']).toBe('bytes=10-')
+  })
+
+  it('rejects a server that ignores a resume Range request', async () => {
+    global.fetch
+      .mockResolvedValueOnce(
+        mockResponse({
+          body: ['First part'],
+          headers: { 'content-length': '22' },
+          failAfter: 0,
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          body: ['First part second part'],
+          headers: { 'content-length': '22' },
+          status: 200,
+        })
+      )
+
+    const stream = await fetchStream('https://example.com', {}, { maxRetries: 1, retryDelay })
+
+    await expect(readText(stream)).rejects.toThrow('Max retries reached')
+  })
+
+  it('resumes when Content-Range is hidden by CORS', async () => {
+    global.fetch
+      .mockResolvedValueOnce(
+        mockResponse({
+          body: ['First part'],
+          headers: { 'content-length': '22' },
+          failAfter: 0,
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          body: [' second part'],
+          headers: { 'content-length': '12' },
+          status: 206,
+        })
+      )
+
+    const stream = await fetchStream('https://example.com', {}, { maxRetries: 1, retryDelay })
+
+    expect(await readText(stream)).toBe('First part second part')
   })
 
   it('throws after max retries', async () => {
