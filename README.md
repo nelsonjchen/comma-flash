@@ -6,7 +6,7 @@ This tool allows you to flash AGNOS onto your comma device. Uses [qdl.js](https:
 
 ## Storage modes
 
-* **Standard** first verifies local disk space by writing a temporary 5.25 GiB random-data file. The file is held as a reservation until flashing begins, then deleted before images are downloaded and staged for A/B partitions.
+* **Standard** first verifies local disk space by writing a temporary 5.25 GiB blank file. The file is held as a reservation until flashing begins, then deleted before images are downloaded and staged for A/B partitions.
 * **Low storage (experimental)** streams downloaded XZ images through a bounded-memory decompressor directly to the device. It does not require OPFS, but requires a stable connection and downloads images for A/B partitions once per slot.
 
 ## Development

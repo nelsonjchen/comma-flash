@@ -11,6 +11,7 @@ function notFoundError() {
 function createFakeOpfs({ failWrite = undefined } = {}) {
   let exists = false
   let size = 0
+  let allZero = true
   const writes = []
   const removeEntry = vi.fn(async () => {
     if (!exists) throw notFoundError()
@@ -22,6 +23,7 @@ function createFakeOpfs({ failWrite = undefined } = {}) {
     return {
       write: vi.fn(async (chunk) => {
         if (failWrite?.(writes.length, chunk)) throw new DOMException('Disk full', 'QuotaExceededError')
+        allZero = allZero && chunk.every((byte) => byte === 0)
         writes.push(chunk.byteLength)
         size += chunk.byteLength
       }),
@@ -47,7 +49,7 @@ function createFakeOpfs({ failWrite = undefined } = {}) {
     value: { getDirectory: vi.fn(async () => root) },
   })
 
-  return { createWritable, removeEntry, writes }
+  return { createWritable, removeEntry, writes, allZero: () => allZero }
 }
 
 afterEach(() => {
@@ -56,13 +58,14 @@ afterEach(() => {
 })
 
 describe('storage balloon test', () => {
-  test('writes random data up to the requested size and retains the file', async () => {
+  test('writes blank data up to the requested size and retains the file', async () => {
     const opfs = createFakeOpfs()
     const progress = vi.fn()
 
     await expect(runStorageProbe({ targetBytes: 10, chunkBytes: 4, onProgress: progress }))
       .resolves.toEqual({ writtenBytes: 10 })
     expect(opfs.writes).toEqual([4, 4, 2])
+    expect(opfs.allZero()).toBe(true)
     expect(progress).toHaveBeenLastCalledWith(1, 10)
 
     await expect(runStorageProbe({ targetBytes: 10, chunkBytes: 4 }))

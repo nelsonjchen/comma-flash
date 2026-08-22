@@ -15,7 +15,6 @@ export const MIN_STORAGE_GB = 5.25
 export const STORAGE_PROBE_BYTES = MIN_STORAGE_GB * (2 ** 30)
 const STORAGE_PROBE_FILE = '.comma-flash-storage-probe'
 const STORAGE_PROBE_CHUNK_BYTES = 8 * 1024 * 1024
-const RANDOM_CHUNK_BYTES = 64 * 1024
 
 export class StorageProbeError extends Error {
   constructor(message, writtenBytes, cause = undefined) {
@@ -38,12 +37,6 @@ export async function cleanupStorageProbe() {
   if (!navigator.storage?.getDirectory) return
   const root = await navigator.storage.getDirectory()
   await removeProbeFile(root)
-}
-
-function fillRandom(bytes) {
-  for (let offset = 0; offset < bytes.byteLength; offset += RANDOM_CHUNK_BYTES) {
-    crypto.getRandomValues(bytes.subarray(offset, Math.min(offset + RANDOM_CHUNK_BYTES, bytes.byteLength)))
-  }
 }
 
 export async function runStorageProbe({
@@ -75,7 +68,6 @@ export async function runStorageProbe({
       if (signal?.aborted) throw new DOMException('Storage test canceled', 'AbortError')
       const writeLength = Math.min(chunkBytes, targetBytes - writtenBytes)
       const chunk = new Uint8Array(writeLength)
-      fillRandom(chunk)
       await writable.write(chunk)
       writtenBytes += writeLength
       onProgress?.(writtenBytes / targetBytes, writtenBytes)
