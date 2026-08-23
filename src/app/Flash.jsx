@@ -591,7 +591,7 @@ function StoragePreCheck({ flashMode, storageCleanupComplete, onProbeStatusChang
       })
       if (probeRunRef.current !== runId) return
       try { localStorage.removeItem(STORAGE_PROBE_MARKER) } catch { /* ignored */ }
-      updateProbeStatus('passed', 'Storage pre-check passed.')
+      updateProbeStatus('passed', 'Passed')
     } catch (error) {
       if (probeRunRef.current !== runId) return
       try { localStorage.removeItem(STORAGE_PROBE_MARKER) } catch { /* ignored */ }
@@ -599,12 +599,12 @@ function StoragePreCheck({ flashMode, storageCleanupComplete, onProbeStatusChang
         if (flashModeRef.current === FlashMode.STREAMING) {
           updateProbeStatus('skipped')
         } else {
-          updateProbeStatus('failed', 'Storage pre-check canceled. Retry it or choose Low storage.')
+          updateProbeStatus('failed', 'Canceled. Retry or choose Low storage.')
         }
       } else {
         updateProbeStatus(
           'failed',
-          'Storage pre-check failed. Your computer does not have enough free disk space for Standard mode. Free at least 6 GiB or choose Low storage.',
+          'Storage pre-check failed. Do not use Incognito or InPrivate browsing. If you are already in a regular window, free at least 6 GiB or choose Low storage.',
         )
       }
     } finally {
@@ -631,7 +631,7 @@ function StoragePreCheck({ flashMode, storageCleanupComplete, onProbeStatusChang
         // Continue with a new probe when localStorage is unavailable.
       }
       if (previousProbeInterrupted) {
-        updateProbeStatus('failed', 'Storage pre-check failed. Your computer does not have enough free disk space for Standard mode. Free at least 6 GiB or choose Low storage.')
+        updateProbeStatus('failed', 'Storage pre-check failed. Do not use Incognito or InPrivate browsing. If you are already in a regular window, free at least 6 GiB or choose Low storage.')
         return
       }
     }
@@ -648,6 +648,7 @@ function StoragePreCheck({ flashMode, storageCleanupComplete, onProbeStatusChang
   return (
     <div className="mb-3 rounded-lg border border-gray-200 bg-white p-3 text-sm">
       <p className="font-semibold">Storage pre-check</p>
+      <p className="mt-1 text-amber-700">Do not use Incognito or InPrivate browsing.</p>
       {flashMode === FlashMode.STAGED && probeStatus === 'running' && (
         <div className="mt-3">
           <div className="flex justify-between gap-3">

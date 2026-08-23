@@ -22,4 +22,5 @@ test('shows the storage pre-check', () => {
   fireEvent.click(screen.getByRole('button', { name: 'Start' }))
 
   expect(screen.getByText('Storage pre-check')).toBeInTheDocument()
+  expect(screen.getByText('Do not use Incognito or InPrivate browsing.')).toBeInTheDocument()
 })
