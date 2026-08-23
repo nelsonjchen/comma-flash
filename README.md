@@ -4,6 +4,8 @@
 
 This tool allows you to flash AGNOS onto your comma device. Uses [qdl.js](https://github.com/commaai/qdl.js).
 
+Before flashing, the tool verifies local disk space by writing a temporary 5.25 GiB blank file. The file is held as a reservation until flashing begins, then deleted before images are downloaded and staged for A/B partitions.
+
 ## Development
 
 ```bash
