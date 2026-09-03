@@ -131,7 +131,12 @@ const imageWorker = {
     const shaObj = new jsSHA('SHA-256', 'UINT8ARRAY')
     let complete
     try {
-      const reader = (new XzReadableStream(archiveFile.stream())).getReader()
+      let stream = archiveFile.stream()
+      if (image.compressed) {
+        stream = new XzReadableStream(stream)
+      }
+
+      const reader = stream.getReader()
 
       await readChunks(reader, imageSize, {
         onChunk: async (chunk) => {

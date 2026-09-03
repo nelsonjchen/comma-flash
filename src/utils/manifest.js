@@ -43,6 +43,12 @@ export class Image {
    */
   archiveUrl
 
+  /**
+   * Whether the image is compressed and should be unpacked
+   * @type {boolean}
+   */
+  compressed
+
   constructor(json) {
     this.name = json.name
     this.sparse = json.sparse
@@ -62,6 +68,7 @@ export class Image {
     }
 
     this.archiveFileName = this.archiveUrl.split('/').pop()
+    this.compressed = this.archiveFileName.endsWith('.xz')
   }
 }
 

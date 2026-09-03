@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from 'vitest'
+import { Blob as NodeBlob } from 'node:buffer'
 
 import * as Comlink from 'comlink'
 
@@ -69,7 +70,7 @@ for (const [branch, manifestUrl] of Object.entries(config.manifests)) {
             const response = await fetch(image.archiveUrl)
             expect(response.ok, 'to be uploaded').toBe(true)
 
-            return response.blob()
+            return new NodeBlob([await response.arrayBuffer()])
           })
 
           const imageWorker = await getImageWorker()

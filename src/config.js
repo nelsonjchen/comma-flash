@@ -1,7 +1,6 @@
 const config = {
   manifests: {
-    release: 'https://raw.githubusercontent.com/commaai/openpilot/release3/system/hardware/tici/agnos.json',
-    master: 'https://raw.githubusercontent.com/commaai/openpilot/master/system/hardware/tici/agnos.json',
+    release: 'https://raw.githubusercontent.com/commaai/openpilot/bedbe6fd94dcf198d7f9feb310adf72c31e1bb9d/system/hardware/tici/agnos.json',
   },
 }
 
