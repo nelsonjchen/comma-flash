@@ -40,8 +40,9 @@ test('shows private-browsing guidance after a storage failure', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Start' }))
 
   expect(screen.queryByText(/Do not use Incognito or InPrivate browsing/)).not.toBeInTheDocument()
-  expect(await screen.findByText(/Free at least 6 GiB of space on this device/)).toBeInTheDocument()
-  expect(screen.getByText(/If you are using Incognito or InPrivate browsing/)).toBeInTheDocument()
+  expect(await screen.findByText(/Free at least 6 GiB on this device/)).toBeInTheDocument()
+  expect(screen.getByText(/chrome:\/\/settings\/content\/siteData/)).toBeInTheDocument()
+  expect(screen.getByText(/Make sure this page is open in a regular browser window—not an Incognito, InPrivate, or Private window/)).toBeInTheDocument()
 })
 
 test('does not cancel the storage pre-check during the Strict Mode effect cycle', async () => {

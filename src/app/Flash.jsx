@@ -548,7 +548,7 @@ function WebUSBConnect({ onConnect }) {
 
 const STORAGE_PROBE_MARKER = 'comma-flash-storage-probe-active'
 const FORCE_STORAGE_PROBE_FAILURE = import.meta.env.DEV && new URLSearchParams(window.location.search).has('storageFail')
-const STORAGE_PROBE_FAILURE_MESSAGE = 'Storage check failed. Free at least 6 GiB of space on this device and retry. If you are using Incognito or InPrivate browsing, switch to a regular window.'
+const STORAGE_PROBE_FAILURE_MESSAGE = 'Storage check failed. Make sure this page is open in a regular browser window—not an Incognito, InPrivate, or Private window. If you are already in a regular window, the device may not have at least 6 GiB free, or the browser may be limiting persistent site storage. Free at least 6 GiB on this device first. If there is enough space, enter chrome://settings/content/siteData in the address bar. Choose "Allow sites to save data on your device" and turn off any setting that deletes site data when the browser closes. Fully quit and reopen the browser, not just this tab, then retry.'
 
 function StoragePreCheck({ storageCleanupComplete, onProbeStatusChange }) {
   const [probeStatus, setProbeStatus] = useState('idle')
