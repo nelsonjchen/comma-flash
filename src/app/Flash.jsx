@@ -310,39 +310,42 @@ function beforeUnloadListener(event) {
 // Stepper/breadcrumb component
 function Stepper({ steps, currentStep, onStepClick }) {
   return (
-    <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-center gap-2">
-      {steps.map((stepName, index) => {
-        const isCompleted = index < currentStep
-        const isCurrent = index === currentStep
-        const isClickable = index < currentStep
+    <nav aria-label="Flash setup progress" className="absolute top-0 left-0 right-0 overflow-x-auto p-4">
+      <div className="mx-auto flex w-max min-w-max items-center justify-center gap-2">
+        {steps.map((stepName, index) => {
+          const isCompleted = index < currentStep
+          const isCurrent = index === currentStep
+          const isClickable = index < currentStep
 
-        return (
-          <div key={stepName} className="flex items-center">
-            {index > 0 && (
-              <div className={`w-8 h-0.5 mx-1 ${isCompleted ? 'bg-[#51ff00]' : 'bg-gray-300'}`} />
-            )}
-            <button
-              onClick={() => isClickable && onStepClick(index)}
-              disabled={!isClickable}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-                isCurrent
-                  ? 'bg-[#51ff00] text-black'
-                  : isCompleted
-                    ? 'bg-[#51ff00]/80 text-black hover:bg-[#51ff00] cursor-pointer'
-                    : 'bg-gray-200 text-gray-500 cursor-default'
-              }`}
-            >
-              {isCompleted && (
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
+          return (
+            <div key={stepName} className="flex items-center">
+              {index > 0 && (
+                <div aria-hidden="true" className={`w-8 h-0.5 mx-1 ${isCompleted ? 'bg-[#51ff00]' : 'bg-gray-300'}`} />
               )}
-              {stepName}
-            </button>
-          </div>
-        )
-      })}
-    </div>
+              <button
+                onClick={() => isClickable && onStepClick(index)}
+                disabled={!isClickable}
+                aria-current={isCurrent ? 'step' : undefined}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                  isCurrent
+                    ? 'bg-[#51ff00] text-black'
+                    : isCompleted
+                      ? 'bg-[#51ff00]/80 text-black hover:bg-[#51ff00] cursor-pointer'
+                      : 'bg-gray-200 text-gray-500 cursor-default'
+                }`}
+              >
+                {isCompleted && (
+                  <svg aria-hidden="true" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+                {stepName}
+              </button>
+            </div>
+          )
+        })}
+      </div>
+    </nav>
   )
 }
 
@@ -548,21 +551,22 @@ function WebUSBConnect({ onConnect }) {
 
 const STORAGE_PROBE_MARKER = 'comma-flash-storage-probe-active'
 const FORCE_STORAGE_PROBE_FAILURE = import.meta.env.DEV && new URLSearchParams(window.location.search).has('storageFail')
-const STORAGE_PROBE_FAILURE_MESSAGE = 'Storage check failed. Make sure this page is open in a regular browser window—not an Incognito, InPrivate, or Private window. If you are already in a regular window, the device may not have at least 6 GiB free, or the browser may be limiting persistent site storage. Free at least 6 GiB on this device first. If there is enough space, enter chrome://settings/content/siteData in the address bar. Choose "Allow sites to save data on your device" and turn off any setting that deletes site data when the browser closes. Fully quit and reopen the browser, not just this tab, then retry.'
+const STORAGE_PROBE_FAILURE_MESSAGE = 'The browser could not reserve the 5.25 GiB needed for flashing.'
+const STORAGE_PROBE_SETTINGS_URL = 'chrome://settings/content/siteData'
 
-function StoragePreCheck({ storageCleanupComplete, onProbeStatusChange }) {
+function StoragePreCheck({ storageCleanupComplete, onPassed }) {
   const [probeStatus, setProbeStatus] = useState('idle')
   const [probeProgress, setProbeProgress] = useState(0)
   const [probeMessage, setProbeMessage] = useState('')
   const probeStatusRef = useRef('idle')
   const probeAbortRef = useRef(null)
   const probeRunRef = useRef(0)
+  const skipRequestedRef = useRef(false)
 
   const updateProbeStatus = (nextStatus, nextMessage = '') => {
     probeStatusRef.current = nextStatus
     setProbeStatus(nextStatus)
     setProbeMessage(nextMessage)
-    onProbeStatusChange(nextStatus)
   }
 
   const startProbe = async () => {
@@ -591,11 +595,17 @@ function StoragePreCheck({ storageCleanupComplete, onProbeStatusChange }) {
       if (probeRunRef.current !== runId) return
       try { localStorage.removeItem(STORAGE_PROBE_MARKER) } catch { /* ignored */ }
       updateProbeStatus('passed', 'Passed')
+      onPassed?.()
     } catch (error) {
       if (probeRunRef.current !== runId) return
       try { localStorage.removeItem(STORAGE_PROBE_MARKER) } catch { /* ignored */ }
+      if (skipRequestedRef.current) {
+        skipRequestedRef.current = false
+        onPassed?.()
+        return
+      }
       if (error?.name === 'AbortError') {
-        updateProbeStatus('failed', 'Canceled. Retry the storage pre-check.')
+        updateProbeStatus('failed', 'The storage check was canceled. Retry to continue.')
       } else {
         updateProbeStatus('failed', STORAGE_PROBE_FAILURE_MESSAGE)
       }
@@ -610,6 +620,7 @@ function StoragePreCheck({ storageCleanupComplete, onProbeStatusChange }) {
     // Deferring one task prevents React Strict Mode's development-only effect
     // cleanup from starting and immediately aborting the real storage probe.
     const startTimer = setTimeout(() => {
+      if (probeStatusRef.current !== 'idle') return
       let previousProbeInterrupted = false
       try {
         previousProbeInterrupted = localStorage.getItem(STORAGE_PROBE_MARKER) === '1'
@@ -629,68 +640,112 @@ function StoragePreCheck({ storageCleanupComplete, onProbeStatusChange }) {
   }, [storageCleanupComplete])
 
   useEffect(() => () => {
+    probeRunRef.current += 1
     if (probeStatusRef.current === 'running') probeAbortRef.current?.abort()
   }, [])
 
-  const probePassed = probeStatus === 'passed'
   const probeFailed = probeStatus === 'failed'
+  const skipProbe = (event) => {
+    if (event.shiftKey) {
+      // Shift-click is an intentional tester shortcut for exercising the failure UI.
+      probeRunRef.current += 1
+      probeAbortRef.current?.abort()
+      try { localStorage.removeItem(STORAGE_PROBE_MARKER) } catch { /* ignored */ }
+      updateProbeStatus('failed', STORAGE_PROBE_FAILURE_MESSAGE)
+      return
+    }
+
+    if (probeStatusRef.current === 'running') {
+      skipRequestedRef.current = true
+      updateProbeStatus('skipping')
+      probeAbortRef.current?.abort()
+      return
+    }
+
+    onPassed?.()
+  }
 
   return (
-    <div className={`w-full max-w-2xl rounded-xl border-2 px-5 py-4 transition-colors ${
-      probePassed
-        ? 'border-[#51ff00] bg-[#51ff00]/10'
-        : probeFailed
-          ? 'border-red-300 bg-red-50'
-          : 'border-gray-300 bg-white'
-    }`}>
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <p className="text-lg font-semibold">Storage check</p>
-          {!probeFailed && (
-            <p className="mt-0.5 text-sm text-gray-600">
-              {probePassed ? '5.25 GiB reserved for flashing.' : 'Reserving 5.25 GiB before flashing...'}
-            </p>
-          )}
-        </div>
-        {probePassed && (
-          <span className="rounded-full bg-[#51ff00] px-3 py-1 text-sm font-semibold text-black">Passed</span>
-        )}
-        {probeStatus === 'running' && (
-          <button
-            type="button"
-            onClick={() => probeAbortRef.current?.abort()}
-            className="rounded-full border border-gray-300 px-3 py-1 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-black"
-          >
-            Cancel
-          </button>
-        )}
-      </div>
-      {probeStatus === 'running' && (
-        <div className="mt-4 h-2 overflow-hidden rounded-full bg-gray-200">
-          <div className="h-full rounded-full bg-[#51ff00] transition-all" style={{ width: `${probeProgress * 100}%` }} />
-        </div>
-      )}
-      {probeFailed && (
-        <div className="mt-2 text-sm text-red-700">
-          <p>{probeMessage}</p>
+    <div className="wizard-screen flex flex-col items-center justify-center h-full gap-6 overflow-y-auto px-6 pb-10 pt-24 sm:px-8">
+      {probeFailed ? (
+        <>
+          <div className="w-full max-w-2xl text-center" role="alert">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-red-100 text-red-700">
+              <svg aria-hidden="true" className="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.3 3.8 2.9 17a2 2 0 0 0 1.75 3h14.7a2 2 0 0 0 1.75-3L13.7 3.8a2 2 0 0 0-3.4 0Z" />
+              </svg>
+            </div>
+            <h2 className="text-3xl font-bold mb-2">Storage check failed</h2>
+            <p className="text-lg text-gray-600">{probeMessage}</p>
+          </div>
+
+          <div className="w-full max-w-2xl rounded-2xl border border-gray-200 bg-white p-5 text-left sm:p-6">
+            <h3 className="text-lg font-semibold">Try these steps</h3>
+            <ol className="mt-4 space-y-4 text-base text-gray-700">
+              <li className="flex gap-3">
+                <span aria-hidden="true" className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[#51ff00] font-bold text-black">1</span>
+                <p>Use a regular browser window. Close any Incognito, InPrivate, or Private window.</p>
+              </li>
+              <li className="flex gap-3">
+                <span aria-hidden="true" className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[#51ff00] font-bold text-black">2</span>
+                <p>Free at least 6 GiB of space on this device.</p>
+              </li>
+              <li className="flex gap-3">
+                <span aria-hidden="true" className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[#51ff00] font-bold text-black">3</span>
+                <p>
+                  If there is enough space, open <code className="break-all rounded bg-gray-100 px-1.5 py-0.5 font-mono text-sm text-gray-900">{STORAGE_PROBE_SETTINGS_URL}</code> in the address bar. Choose <strong>Allow sites to save data on your device</strong> and turn off deletion when the browser closes.
+                </p>
+              </li>
+              <li className="flex gap-3">
+                <span aria-hidden="true" className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[#51ff00] font-bold text-black">4</span>
+                <p>Fully quit and reopen the browser—not just this tab—then retry.</p>
+              </li>
+              <li className="flex gap-3">
+                <span aria-hidden="true" className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[#51ff00] font-bold text-black">5</span>
+                <p>If none of these steps work, try again from an Android phone running Chrome, following the same steps above.</p>
+              </li>
+            </ol>
+          </div>
+
           <button
             type="button"
             onClick={startProbe}
-            className="mt-3 rounded-full bg-[#51ff00] px-4 py-2 font-semibold text-black transition-colors hover:bg-[#45e000] active:bg-[#3acc00]"
+            className="rounded-full bg-[#51ff00] px-6 py-3 text-lg font-semibold text-black transition-colors hover:bg-[#45e000] active:bg-[#3acc00]"
           >
             Retry storage check
           </button>
-        </div>
+        </>
+      ) : (
+        <>
+          <div className="text-center">
+            <h2 className="text-3xl font-bold mb-2">Checking available storage</h2>
+            <p className="text-xl text-gray-600" aria-live="polite">
+              {probeStatus === 'skipping' ? 'Continuing without checking...' : 'Reserving 5.25 GiB before flashing...'}
+            </p>
+          </div>
+          {probeStatus === 'running' && (
+            <div className="w-full max-w-2xl h-2 overflow-hidden rounded-full bg-gray-200">
+              <div className="h-full rounded-full bg-[#51ff00] transition-all" style={{ width: `${probeProgress * 100}%` }} />
+            </div>
+          )}
+          {probeStatus !== 'skipping' && (
+            <button
+              type="button"
+              onClick={skipProbe}
+              className="text-sm text-gray-500 underline transition-colors hover:text-black"
+            >
+              Skip storage check
+            </button>
+          )}
+        </>
       )}
     </div>
   )
 }
 
 // Device picker component
-function DevicePicker({ onSelect, storageCleanupComplete }) {
+function DevicePicker({ onSelect }) {
   const [selected, setSelected] = useState(null)
-  const [probeStatus, setProbeStatus] = useState('idle')
-  const storageReady = probeStatus === 'passed'
 
   return (
     <div className="wizard-screen flex flex-col items-center justify-center h-full gap-6 p-8 overflow-y-auto">
@@ -725,16 +780,11 @@ function DevicePicker({ onSelect, storageCleanupComplete }) {
         </button>
       </div>
 
-      <StoragePreCheck
-        storageCleanupComplete={storageCleanupComplete}
-        onProbeStatusChange={setProbeStatus}
-      />
-
       <button
-        onClick={() => selected && storageReady && onSelect(selected)}
-        disabled={!selected || !storageReady}
+        onClick={() => selected && onSelect(selected)}
+        disabled={!selected}
         className={`px-8 py-3 text-xl font-semibold rounded-full transition-colors ${
-          selected && storageReady
+          selected
             ? 'bg-[#51ff00] hover:bg-[#45e000] active:bg-[#3acc00] text-black'
             : 'bg-gray-300 text-gray-500 cursor-not-allowed'
         }`}
@@ -747,7 +797,7 @@ function DevicePicker({ onSelect, storageCleanupComplete }) {
 
 // Build wizard steps dynamically based on platform and device
 function getWizardSteps(selectedDevice) {
-  const steps = ['Device']
+  const steps = ['Storage', 'Device']
   if (isWindows) steps.push('Driver')
   steps.push('Connect')
   if (isLinux && selectedDevice === DeviceType.COMMA_3) steps.push('Unbind')
@@ -758,6 +808,7 @@ function getWizardSteps(selectedDevice) {
 // Map screen names to step names
 const screenToStep = {
   device: 'Device',
+  storage: 'Storage',
   zadig: 'Driver',
   connect: 'Connect',
   unbind: 'Unbind',
@@ -775,7 +826,7 @@ export default function Flash() {
   const [serial, setSerial] = useState(null)
   const [selectedDevice, setSelectedDevice] = useState(null)
   const [storageCleanupComplete, setStorageCleanupComplete] = useState(false)
-  const [wizardScreen, setWizardScreen] = useState('landing') // 'landing', 'device', 'zadig', 'connect', 'unbind', 'webusb', 'flash'
+  const [wizardScreen, setWizardScreen] = useState('landing') // 'landing', 'device', 'storage', 'zadig', 'connect', 'unbind', 'webusb', 'flash'
   const reportSentRef = useRef(false)
 
   const qdlManager = useRef(null)
@@ -865,6 +916,12 @@ export default function Flash() {
   // Handle user clicking start on landing page
   const handleStart = () => {
     setStep(StepCode.DEVICE_PICKER)
+    setWizardScreen('storage')
+  }
+
+  // Handle storage check completion
+  const handleStoragePassed = () => {
+    setStep(StepCode.DEVICE_PICKER)
     setWizardScreen('device')
   }
 
@@ -906,7 +963,9 @@ export default function Flash() {
   // Handle going back in wizard
   const handleWizardBack = (toStep) => {
     const stepName = wizardSteps[toStep]
-    if (stepName === 'Device') {
+    if (stepName === 'Storage') {
+      setWizardScreen('storage')
+    } else if (stepName === 'Device') {
       setStep(StepCode.DEVICE_PICKER)
       setWizardScreen('device')
       setSelectedDevice(null)
@@ -937,7 +996,20 @@ export default function Flash() {
     return (
       <div className="relative h-full">
         <Stepper steps={wizardSteps} currentStep={wizardStep} onStepClick={handleWizardBack} />
-        <DevicePicker onSelect={handleDeviceSelect} storageCleanupComplete={storageCleanupComplete} />
+        <DevicePicker onSelect={handleDeviceSelect} />
+      </div>
+    )
+  }
+
+  // Render storage pre-check
+  if (wizardScreen === 'storage' && !error) {
+    return (
+      <div className="relative h-full">
+        <Stepper steps={wizardSteps} currentStep={wizardStep} onStepClick={handleWizardBack} />
+        <StoragePreCheck
+          storageCleanupComplete={storageCleanupComplete}
+          onPassed={handleStoragePassed}
+        />
       </div>
     )
   }
