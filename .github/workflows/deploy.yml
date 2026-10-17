@@ -18,13 +18,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v1
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.0.6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
 
       - id: vars
         run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - run: bun install
-      - run: bun run build
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
         env:
           VITE_PUBLIC_GIT_SHA: ${{ steps.vars.outputs.sha_short }}
 

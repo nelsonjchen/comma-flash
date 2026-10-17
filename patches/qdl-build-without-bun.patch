@@ -1,0 +1,11 @@
+--- a/package.json
++++ b/package.json
+@@ -25,7 +25,7 @@
+   },
+   "scripts": {
+     "build": "tsc",
+-    "postinstall": "bun run build",
++    "postinstall": "tsc",
+     "lint": "biome lint"
+   },
+   "bin": {

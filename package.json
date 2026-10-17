@@ -37,9 +37,15 @@
     "vite-svg-loader": "^5.1.0",
     "vitest": "^3.1.1"
   },
-  "trustedDependencies": [
-    "@commaai/qdl",
-    "esbuild",
-    "usb"
-  ]
+  "packageManager": "pnpm@9.0.6",
+  "pnpm": {
+    "patchedDependencies": {
+      "@commaai/qdl@0.1.0": "patches/qdl-build-without-bun.patch"
+    },
+    "onlyBuiltDependencies": [
+      "@commaai/qdl",
+      "esbuild",
+      "usb"
+    ]
+  }
 }

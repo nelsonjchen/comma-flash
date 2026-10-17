@@ -6,9 +6,11 @@ This tool allows you to flash AGNOS onto your comma device. Uses [qdl.js](https:
 
 ## Development
 
+Use Node.js 22 or newer and pnpm 9.0.6.
+
 ```bash
-bun install
-bun dev
+pnpm install --frozen-lockfile
+pnpm dev
 ```
 
 Open [http://localhost:5173](http://localhost:5173) with your browser to see the result.
