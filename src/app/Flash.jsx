@@ -9,6 +9,7 @@ import {
   useImageManager,
 } from '../utils/image'
 import { isLinux, isWindows } from '../utils/platform'
+import { formatLogValue } from '../utils/log'
 import config from '../config'
 
 import comma from '../assets/comma.svg'
@@ -50,14 +51,14 @@ const MAX_LOGS = 500
 const originalConsole = { log: console.log, warn: console.warn, error: console.error, info: console.info, debug: console.debug }
 ;['log', 'warn', 'error', 'info', 'debug'].forEach(level => {
   console[level] = (...args) => {
-    consoleLogs.push({ level, time: new Date().toISOString(), message: args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ') })
+    consoleLogs.push({ level, time: new Date().toISOString(), message: args.map(value => formatLogValue(value)).join(' ') })
     if (consoleLogs.length > MAX_LOGS) consoleLogs.shift()
     originalConsole[level]?.(...args)
   }
 })
 
 // Debug info component for error reporting
-function DebugInfo({ error, step, selectedDevice, serial, message, onClose }) {
+function DebugInfo({ error, errorDetails, step, selectedDevice, serial, message, onClose }) {
   const [copied, setCopied] = useState(false)
 
   const getDebugReport = () => {
@@ -96,6 +97,7 @@ function DebugInfo({ error, step, selectedDevice, serial, message, onClose }) {
 **Device:** ${deviceName}
 **Serial:** ${serial || 'N/A'}
 **Error:** ${errorName}
+**Underlying error:** ${errorDetails || 'N/A'}
 **Step:** ${stepName}
 **Last Message:** ${message || 'N/A'}
 
@@ -821,6 +823,7 @@ export default function Flash() {
   const [message, setMessage] = useState('')
   const [progress, setProgress] = useState(-1)
   const [error, setError] = useState(ErrorCode.NONE)
+  const [errorDetails, setErrorDetails] = useState('')
   const [showDebugInfo, setShowDebugInfo] = useState(false)
   const [connected, setConnected] = useState(false)
   const [serial, setSerial] = useState(null)
@@ -853,7 +856,10 @@ export default function Flash() {
           onStepChange: setStep,
           onMessageChange: setMessage,
           onProgressChange: setProgress,
-          onErrorChange: setError,
+          onErrorChange: (code, cause) => {
+            setErrorDetails(cause === undefined ? '' : formatLogValue(cause))
+            setError(code)
+          },
           onConnectionChange: setConnected,
           onSerialChange: setSerial,
         })
@@ -863,6 +869,7 @@ export default function Flash() {
       })
       .catch((err) => {
         console.error('Error initializing Flash manager:', err)
+        setErrorDetails(formatLogValue(err))
         setError(ErrorCode.UNKNOWN)
       })
   }, [config, imageManager.current])
@@ -888,7 +895,7 @@ export default function Flash() {
     Sentry.captureMessage('flash_session', {
       level: result === 'pass' ? 'info' : 'error',
       tags: { result, serial, device_type: selectedDevice, error_code: errorName, step: stepName },
-      extra: { console_tail: consoleLogs.slice(-200) },
+      extra: { error_details: errorDetails, console_tail: consoleLogs.slice(-200) },
     })
   }
 
@@ -1127,6 +1134,11 @@ export default function Flash() {
           </button>
         )}
       </span>
+      {error !== ErrorCode.NONE && errorDetails && (
+        <pre className="mx-4 w-full max-w-xl px-4 text-sm text-left whitespace-pre-wrap break-words font-mono" role="alert">
+          {errorDetails}
+        </pre>
+      )}
       {error !== ErrorCode.NONE && !hideRetry && (
         <button
           className="px-8 py-3 text-xl font-semibold rounded-full bg-[#51ff00] hover:bg-[#45e000] active:bg-[#3acc00] text-black transition-colors"
@@ -1139,6 +1151,7 @@ export default function Flash() {
       {error !== ErrorCode.NONE && (!hideRetry || showDebugInfo) && (
         <DebugInfo
           error={error}
+          errorDetails={errorDetails}
           step={step}
           selectedDevice={selectedDevice}
           serial={serial}

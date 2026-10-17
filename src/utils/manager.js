@@ -97,7 +97,7 @@ export function checkCompatibleDevice(storageInfo) {
  * @property {ChangeCallback<number>} [onStepChange]
  * @property {ChangeCallback<string>} [onMessageChange]
  * @property {ChangeCallback<number>} [onProgressChange]
- * @property {ChangeCallback<number>} [onErrorChange]
+ * @property {(code: number, cause?: unknown) => void} [onErrorChange]
  * @property {ChangeCallback<boolean>} [onConnectionChange]
  * @property {ChangeCallback<string>} [onSerialChange]
  */
@@ -140,10 +140,13 @@ export class FlashManager {
     this.callbacks.onProgressChange?.(progress)
   }
 
-  /** @param {number} error */
-  #setError(error) {
+  /**
+   * @param {number} error
+   * @param {unknown} [cause]
+   */
+  #setError(error, cause) {
     this.error = error
-    this.callbacks.onErrorChange?.(error)
+    this.callbacks.onErrorChange?.(error, cause)
     this.#setProgress(-1)
 
     if (error !== ErrorCode.NONE) {
@@ -236,7 +239,7 @@ export class FlashManager {
         return
       }
       console.error('[Flash] Connection error', err)
-      this.#setError(ErrorCode.LOST_CONNECTION)
+      this.#setError(ErrorCode.LOST_CONNECTION, new Error('Connecting to device failed', { cause: err }))
       this.#setConnected(false)
       return
     }
@@ -272,7 +275,7 @@ export class FlashManager {
 
     } catch (err) {
       console.error('[Flash] Connection lost', err)
-      this.#setError(ErrorCode.LOST_CONNECTION)
+      this.#setError(ErrorCode.LOST_CONNECTION, new Error('Identifying device type failed', { cause: err }))
       this.#setConnected(false)
       return
     }
@@ -282,7 +285,7 @@ export class FlashManager {
       storageInfo = await this.device.getStorageInfo()
     } catch (err) {
       console.error('[Flash] Connection lost', err)
-      this.#setError(ErrorCode.LOST_CONNECTION)
+      this.#setError(ErrorCode.LOST_CONNECTION, new Error('Reading device storage information failed', { cause: err }))
       this.#setConnected(false)
       return
     }
