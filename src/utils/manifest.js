@@ -76,11 +76,32 @@ export class ManifestImage {
 }
 
 /**
- * @param {string} url
+ * @param {string|string[]} sources URLs for the same device release, in preference order
  * @returns {Promise<ManifestImage[]>}
  */
-export function getManifest(url) {
-  return fetch(url)
-    .then((response) => response.text())
-    .then((text) => JSON.parse(text).map((image) => new ManifestImage(image)))
+export async function getManifest(sources) {
+  const urls = Array.isArray(sources) ? sources : [sources]
+  const failures = []
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(15000) })
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${response.statusText}`.trim())
+      }
+      const images = await response.json()
+      if (!Array.isArray(images) || images.length === 0) {
+        throw new Error('Expected a non-empty partition manifest')
+      }
+      const manifest = images.map((image) => new ManifestImage(image))
+      console.info(`[Manifest] Loaded ${manifest.length} images from ${url}`)
+      return manifest
+    } catch (cause) {
+      const failure = new Error(`${url}: ${cause.message}`, { cause })
+      failures.push(failure)
+      console.warn('[Manifest] Could not load source', failure)
+    }
+  }
+  throw new Error(`Failed to load manifest. ${failures.map((error) => error.message).join('; ')}`, {
+    cause: failures.at(-1),
+  })
 }

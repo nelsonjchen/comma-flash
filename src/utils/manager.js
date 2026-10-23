@@ -268,7 +268,7 @@ export class FlashManager {
         console.error('[Flash] Failed to fetch manifest')
         console.error(err)
         this.#setConnected(false)
-        this.#setError(ErrorCode.UNKNOWN)
+        this.#setError(ErrorCode.UNKNOWN, err)
         return
       }
       console.info('[Flash] Loaded manifest', this.manifest)
